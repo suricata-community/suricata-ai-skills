@@ -1,7 +1,7 @@
 ---
 name: hunt
-description: "Master threat-hunting router for Suricata EVE JSON logs. Profiles which event types and app_protos are actually present in the log, then dispatches to the specialised hunting routines under skills/ — hunt-generic (broad 10-query sweep), hunt-dns-tunnel (DNS tunnelling/exfil/C2), hunt-tls-c2 (DGA SNI, bad certs, TLS beaconing), hunt-smb-dcerpc (lateral movement, EternalBlue, DCSync, RPC coercion) — and merges their findings into one correlated report. Use when asked to hunt for threats, find C2 or beaconing, investigate data exfiltration, look for compromised or lateral-moving hosts, or run a security assessment over a Suricata log."
-argument-hint: "[path to eve.json, default: eve.json in current directory] [optional: focus area — dns | tls | smb | generic | all]"
+description: "Master threat-hunting router for Suricata EVE JSON logs. Profiles which event types and app_protos are actually present in the log, then dispatches to the specialised hunting routines under skills/ — hunt-generic (broad 10-query sweep), hunt-dns-tunnel (DNS tunnelling/exfil/C2), hunt-tls-c2 (DGA SNI, bad certs, TLS beaconing), hunt-smb-dcerpc (lateral movement, EternalBlue, DCSync, RPC coercion), hunt-ldap (LDAP/CLDAP spray, NTLM relay to LDAP, directory recon and writes, CLDAP enumeration) — and merges their findings into one correlated report. Use when asked to hunt for threats, find C2 or beaconing, investigate data exfiltration, look for compromised or lateral-moving hosts, or run a security assessment over a Suricata log."
+argument-hint: "[path to eve.json, default: eve.json in current directory] [optional: focus area — dns | tls | smb | ldap | generic | all]"
 allowed-tools: "Bash, Read, Write, Glob, Grep"
 ---
 
@@ -77,6 +77,7 @@ upload cannot be recalled.
 | **@hunt-dns-tunnel** | `skills/hunt-dns-tunnel/SKILL.md` | TXT base64 chunked file exfiltration; dnscat2-style hex-QNAME C2 with MX/TXT/CNAME rotation; payload reconstruction and decoding; query-rate and flow-size correlation |
 | **@hunt-tls-c2** | `skills/hunt-tls-c2/SKILL.md` | High-entropy / word-list DGA SNI, IP-literal and malformed SNI, high-abuse TLDs, self-signed and OpenSSL-default certificates, long-lived C2 flows (`flow.age > 300 s`), single-destination beacons, JA3/JA4 pivots |
 | **@hunt-smb-dcerpc** | `skills/hunt-smb-dcerpc/SKILL.md` | Flow-anchored `tx_cnt` pivot into SMB/DCERPC: EternalBlue/MS17-010, PsExec C$ writes, password spray, share enumeration, DCSync, Zerologon, PetitPotam/PrinterBug coercion, EPM recon, SVCCTL/ATSVC exec, named-pipe hammering |
+| **@hunt-ldap** | `skills/hunt-ldap/SKILL.md` | LDAP/CLDAP: SASL blob decoding (NTLM identity, v1/v2, signing vs Kerberos), spray/brute force with AD `data` sub-codes, NTLM relay to LDAP, cleartext and anonymous binds, secret-attribute reads (LAPS/gMSA), shadow-credential/RBCD/SPN/computer-add writes, DirSync/SD_FLAGS controls, CLDAP Netlogon DC inventory and user enumeration, internet CLDAP reflection, bulk pulls through sealed sessions |
 
 ---
 
@@ -223,8 +224,8 @@ against the wrong version returns **zero rows and reads exactly like a clean res
 Present the routines below to the user with the Step 2 profile alongside them, mark the
 ones that have data, and ask which to run. Offer **all applicable** as the default.
 
-If the user already named a focus in their request (`dns`, `tls`, `smb`, `generic`, or
-`all`), skip the question and run that selection directly.
+If the user already named a focus in their request (`dns`, `tls`, `smb`, `ldap`, `generic`,
+or `all`), skip the question and run that selection directly.
 
 ---
 
@@ -269,7 +270,20 @@ Use `@hunt-smb-dcerpc` skill for structured threat hunting methodologies for det
 - Service-control and scheduled-task lateral movement
 - SMB2 named-pipe hammering
 
-### 4. TLS / encrypted threats — `@hunt-tls-c2`
+### 4. Active Directory / directory threats — `@hunt-ldap`
+
+*Applicable when: `event_type:ldap` is present, or flows to 389/636/3268/3269 exist.*
+
+Use `@hunt-ldap` skill for structured threat hunting methodologies for detecting:
+- LDAP password spray and brute force (AD `data 52e` / `775` lockout)
+- NTLM relay to LDAP, unsigned NTLM binds, NTLMv1, cleartext simple binds
+- Anonymous binds and unauthenticated directory reads
+- LAPS / gMSA / password attribute reads, BloodHound-style attribute collection
+- Shadow credentials, RBCD, SPN and computer-object writes, privileged group changes
+- CLDAP user enumeration, rogue DC responders, internet CLDAP reflection probing
+- Directory dumps hidden inside sealed SASL sessions (flow volume and cadence)
+
+### 5. TLS / encrypted threats — `@hunt-tls-c2`
 
 *Applicable when: `event_type:tls` is present.*
 
@@ -282,7 +296,7 @@ Use `@hunt-tls-c2` skill for structured threat hunting methodologies for detecti
 - TLS C2 beaconing and exfiltration (long-lived flows, single-destination repetition)
 - JA3 / JA4 fingerprint pivots
 
-### 5. All applicable — recommended default
+### 6. All applicable — recommended default
 
 Run `@hunt-generic` first, then every specialised routine whose protocol appears in the
 Step 2 profile. Order them by the severity of their initial signal — hunt the loudest
@@ -304,6 +318,10 @@ and why:
 - Hunt 3 (suspicious TLD) or Hunt 8 (TLS anomaly) hits → run `@hunt-tls-c2`
 - Hunt 5 (long / high-entropy DNS) hits → run `@hunt-dns-tunnel`
 - Hunt 9 (internal recon) hits, or SMB alerts → run `@hunt-smb-dcerpc`
+- `@hunt-smb-dcerpc` finds coercion (PetitPotam/PrinterBug/DFSCoerce), spray, or DC
+  targets → run `@hunt-ldap` (relayed auth and credential use land on LDAP next)
+- `@hunt-ldap` flags a host (spray, relay, writes, one-off bulk pull) → pivot that IP into
+  whichever routine matches its other traffic; LDAP is rarely the first thing touched
 - Hunt 7 (beaconing) hits → run whichever routine matches the beacon's `app_proto`
 
 **Batch the Bash.** Every routine issues many `jq`/`grep` queries. Chain them into a

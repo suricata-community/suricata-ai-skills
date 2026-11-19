@@ -30,6 +30,7 @@ their findings into one report.
 | `hunt/skills/hunt-dns-tunnel/` | DNS tunnelling — TXT base64 exfiltration and dnscat2-style hex-QNAME C2, with payload decoding |
 | `hunt/skills/hunt-tls-c2/` | Malicious TLS — DGA SNI, bad and self-signed certificates, long-lived C2 flows, JA3/JA4 pivots |
 | `hunt/skills/hunt-smb-dcerpc/` | SMB/DCERPC — EternalBlue, PsExec, password spray, DCSync, Zerologon, RPC coercion |
+| `hunt/skills/hunt-ldap/` | LDAP/CLDAP — spray, NTLM relay to LDAP, cleartext/anonymous binds, LAPS/gMSA reads, shadow credentials/RBCD writes, CLDAP enumeration, sealed bulk pulls |
 
 `hunt/tools/mdpretty.py` renders a finished report in the terminal, no Markdown viewer
 needed.
